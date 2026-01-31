@@ -6,6 +6,8 @@
 #include <memory>
 #include <cstdint>
 #include <stdexcept>
+#include <unordered_map>
+#include <queue>
 
 
 enum class OrderType{
@@ -13,12 +15,12 @@ enum class OrderType{
     Fillandkill,
 };
 
-enum Class OrderSide{
+enum class OrderSide{
     Buy,
     Sell,
 };
 
-using Price =  std::int32_t
+using Price =  std::int32_t;
 using Quantity = std::uint32_t;
 using OrderId = std::uint64_t;
 
@@ -26,8 +28,8 @@ using OrderId = std::uint64_t;
 
 struct LevelInfo {
     Price price;
-    Quantity Quantity;
-}
+    Quantity quantity;
+};
 
 using LevelInfos = std::vector<LevelInfo>;
 
@@ -65,6 +67,7 @@ class Order{
    Quantity GetInitialQuantity() const { return initial_quantity_ ; }
    Quantity GetRemainingQuantity() const { return remaining_quantity_ ; }
    Quantity GetFilledQuantity() const { return GetInitialQuantity() - GetRemainingQuantity() ; }
+   bool IsFilled() const { return GetRemainingQuantity == 0 ; }
 
 
    // Lowest quantity between both orders = quantity to fill both orders
@@ -92,7 +95,7 @@ using OrderPointer = std::shared_ptr<Order>;
 
 
 using OrderPointers = std::list<OrderPointer>;   // Uses a doubly linked list to store orders at the same price level (can use a vector if we want to optimize for cache locality
-
+ 
 class ModifyOrder{
  ModifyOrder(OrderId id, Quantity new_quantity):
   OrderId {id},
@@ -144,6 +147,16 @@ class Trade{
 using Trades = sdtd::vector<Trade>;
 
 
+
+
+
+
+
+
+
+
+
+
 // Use map to represent bids and asks 
 // Access a given order by its OrderId in O(1) time
 class OrderBook{
@@ -154,9 +167,32 @@ class OrderBook{
    OrderPointers::iterator location_;  // iterator to the order's position in the list at its price level
   };
 
-  std::map<Price, OrderPointers, std::greater<Price>> bids_ ; // Map of price levels to lists of buy orders (highest price first)
-  
+  std::map<Price, OrderPointers, std::greater<Price>> bids_ ; // Map of price levels to lists of buy orders (highest price first), std::greater for descending order
+  std::map<Price, OrderPointers, std::less<Price>> asks_ ; // Map of price levels to lists of sell orders (lowest price first)  
+  std::unordered_map<OrderId, OrderEntry> order_map_ ; // Map of OrderId to OrderEntry for quick access
 
+  // Match method to match incoming orders against existing orders
+
+  // Canmatch: FOK orders only match if they can be fully filled immediately
+  bool CanMatch(OrderSide side, Price price)const 
+  {
+   if (side == OrderSide::Buy) {
+       if (asks_.empty()) {
+           return false; // No asks available to match
+       }
+       // Check if price >= best ask price
+       const auto& best_ask = asks_.begin(); // Lowest ask price
+       return price >= best_ask->first;
+  }
+  else 
+  {
+   if (bids_.empty()) {
+       return false; // No bids available to match
+   } 
+   const auto& best_bid = bids_.begin(); // Highest bid price
+    return price <= best_bid->first;
+  }
+ }
 }
 
 
@@ -164,6 +200,64 @@ class OrderBook{
 
 
 
+
+
+
+
+
+
+// Match method to match incoming orders against existing orders
+
+Trades MatchOrders()
+{
+ Trades trades;
+ trades.reserve(order_map_.size()); // Pre-allocate space for trades to minimize reallocations
+
+ while(1){
+  if (bids_.empty() || asks_.empty()){
+   break; // No more possible matches
+  }
+  auto& [bid_price, bid_orders] = *bids_.begin(); // Highest bid price level
+  auto& [ask_price, ask_orders] = *asks_.begin(); // Lowest ask price level
+
+  if (bid_price < ask_price){
+   break; // No more matches possible
+
+  while (bids_.size() && asks_.size()){
+   auto& bid = bids.front();
+   auto& ask = asks.front();
+
+   Quantity quantity = std::min(bid->GetRemainingQuantity(), ask->GetRemainingQuantity()); //? 
+
+   bid.fill(quantity);
+   ask.fill(quantity);
+
+    if (bid.IsFilled())
+     {
+      bids.pop_front(); // Remove filled bid order from queue 
+
+      }
+    if (ask.IsFilled())
+     {
+      asks.pop_front(); // Remove filled ask order from queue 
+     }
+
+    if (bids_.empty())
+     {
+      bids_.erase(bid_price);
+     }
+    if (asks_.empty())
+     {
+      asks_.erase(ask_price);
+     
+     }
+     trades.push_back(Trade(
+      TradeInfo{bid->GetOrderId(), ask->GetOrderId(), ask_price, quantity}));
+      TradeInfo{ask->GetOrderId(), bid->GetOrderId(), bid_price, quantity})); 
+   }
+  }
+ }
+}  
 
 
 int main(){
