@@ -1,12 +1,11 @@
-#include<iostream>
 #include <map>
+#include <unordered_map>
 #include <list>
-#include <stack>
 #include <vector>
 #include <memory>
 #include <cstdint>
 #include <stdexcept>
-#include <unordered_map>
+#include <string>
 #include <queue>
 
 
@@ -23,30 +22,30 @@ enum class OrderSide{
 using Price =  std::int32_t;
 using Quantity = std::uint32_t;
 using OrderId = std::uint64_t;
-
-// Add a vector of OrderId to store multiple orders at the same price level? 
+using LevelInfos = std::vector<struct LevelInfo>;
+// todo: Add a vector of OrderId to store multiple orders at the same price level? 
 
 struct LevelInfo {
     Price price;
     Quantity quantity;
 };
 
-using LevelInfos = std::vector<LevelInfo>;
 
 class OrderBookLevelInfos{
 
-    public:
-        // Constructor for OrderBookLevelInfos
-        OrderBookLevelInfos(const LevelInfos& bids, const LevelInfos& asks): 
-        bids_ {bids},
-        asks_ {asks}
-        { }
-        // Public API
-        const LevelInfos& getBids() const { return bids_; }
-        const LevelInfos& getAsks() const { return asks_; }
-    private:
-        LevelInfos bids_;
-        LevelInfos asks_;
+ public:
+   // Constructor for OrderBookLevelInfos
+   OrderBookLevelInfos(const LevelInfos& bids, const LevelInfos& asks): 
+   bids_ {bids},
+   asks_ {asks}
+   { }
+         
+   // Public API
+   const LevelInfos& getBids() const { return bids_; }
+   const LevelInfos& getAsks() const { return asks_; }
+  private:
+   LevelInfos bids_;
+   LevelInfos asks_;
 };
 
 class Order{
@@ -57,30 +56,30 @@ class Order{
    price_ {price},
    initial_quantity_ {quantity},     // Remaining quantity = initial quantity at order creation
    remaining_quantity_ {quantity},
-   type_ {type}
+   order_type_ {type}
    { }
 
    OrderId GetOrderId() const { return id_ ; }
    OrderSide GetOrderSide() const { return side_ ; }
    Price GetPrice() const { return price_ ; }
-   OrderType GetOrderType() const { return type_ ; } 
+   OrderType GetOrderType() const { return order_type_ ; } 
    Quantity GetInitialQuantity() const { return initial_quantity_ ; }
    Quantity GetRemainingQuantity() const { return remaining_quantity_ ; }
    Quantity GetFilledQuantity() const { return GetInitialQuantity() - GetRemainingQuantity() ; }
-   bool IsFilled() const { return GetRemainingQuantity == 0 ; }
-
+   bool IsFilled() const { return GetRemainingQuantity() == 0 ; }
 
    // Lowest quantity between both orders = quantity to fill both orders
    void Fill(Quantity quantity){
        if(quantity > remaining_quantity_){
-           throw std::logic_error(std::format("Order ({}) Fill quantity exceeds remaining quantity", GetOrderId()));
+           throw std::logic_error("Order (" + std::to_string(GetOrderId()) + ") Fill quantity exceeds remaining quantity");
        }
        remaining_quantity_ -= quantity;
    }
+
  private:
  OrderType order_type_;
  OrderId id_;
- Side side_;
+ OrderSide side_;
  Price price_;
  Quantity initial_quantity_;
  Quantity remaining_quantity_;
@@ -97,27 +96,28 @@ using OrderPointer = std::shared_ptr<Order>;
 using OrderPointers = std::list<OrderPointer>;   // Uses a doubly linked list to store orders at the same price level (can use a vector if we want to optimize for cache locality
  
 class ModifyOrder{
- ModifyOrder(OrderId id, Quantity new_quantity):
-  OrderId {id},
-  side_ {side},
-  price_ {price},
-  Quantity {quantity},
+ public:
+  ModifyOrder(OrderId id, OrderSide side, Price price, Quantity quantity):
+   id_{id},
+   side_{side},
+   price_{price},
+   quantity_{quantity}
   { }
   
-  OrderId GetOrderId() const { return id_ ; }
-  Price GetPrice() const { return price_ ; }
-  side_ GetOrderSide() const { return side_ ; }
-  Quantity GetQuantity() const { return quantity_ ; }
-
+  OrderId GetOrderId() const { return id_; }
+  Price GetPrice() const { return price_; }
+  OrderSide GetOrderSide() const { return side_; }
+  Quantity GetQuantity() const { return quantity_; }
 
   OrderPointer toOrderPointer() const { 
-   return std::make_shared<Order>(id_, side_, price_, quantity_, OrderType::Goodtillcancel);}
+   return std::make_shared<Order>(id_, side_, price_, quantity_, OrderType::Goodtillcancel);
+  }
 
  private:
- OrderId id_;
- price price_;
- side side_;
- Quantity quantity_;
+  OrderId id_;
+  Price price_;
+  OrderSide side_;
+  Quantity quantity_;
 };
 
 
@@ -144,13 +144,7 @@ class Trade{
    TradeInfo ask_trade_;
 };
 
-using Trades = sdtd::vector<Trade>;
-
-
-
-
-
-
+using Trades = std::vector<Trade>;
 
 
 
@@ -167,16 +161,16 @@ class OrderBook{
    OrderPointers::iterator location_;  // iterator to the order's position in the list at its price level
   };
 
+  // Data members
   std::map<Price, OrderPointers, std::greater<Price>> bids_ ; // Map of price levels to lists of buy orders (highest price first), std::greater for descending order
   std::map<Price, OrderPointers, std::less<Price>> asks_ ; // Map of price levels to lists of sell orders (lowest price first)  
   std::unordered_map<OrderId, OrderEntry> order_map_ ; // Map of OrderId to OrderEntry for quick access
 
   // Match method to match incoming orders against existing orders
-
   // Canmatch: FOK orders only match if they can be fully filled immediately
   bool CanMatch(OrderSide side, Price price)const 
   {
-   if (side == OrderSide::Buy) {
+  if (side == OrderSide::Buy) {
        if (asks_.empty()) {
            return false; // No asks available to match
        }
@@ -186,82 +180,158 @@ class OrderBook{
   }
   else 
   {
-   if (bids_.empty()) {
+  if (bids_.empty()) {
        return false; // No bids available to match
    } 
    const auto& best_bid = bids_.begin(); // Highest bid price
     return price <= best_bid->first;
   }
  }
-}
+ 
+ 
+ 
 
-
-
-
-
-
-
-
-
-
-
-
-// Match method to match incoming orders against existing orders
-
-Trades MatchOrders()
-{
- Trades trades;
- trades.reserve(order_map_.size()); // Pre-allocate space for trades to minimize reallocations
-
- while(1){
-  if (bids_.empty() || asks_.empty()){
-   break; // No more possible matches
-  }
-  auto& [bid_price, bid_orders] = *bids_.begin(); // Highest bid price level
-  auto& [ask_price, ask_orders] = *asks_.begin(); // Lowest ask price level
-
-  if (bid_price < ask_price){
-   break; // No more matches possible
-
-  while (bids_.size() && asks_.size()){
-   auto& bid = bids.front();
-   auto& ask = asks.front();
-
-   Quantity quantity = std::min(bid->GetRemainingQuantity(), ask->GetRemainingQuantity()); //? 
-
-   bid.fill(quantity);
-   ask.fill(quantity);
-
-    if (bid.IsFilled())
-     {
-      bids.pop_front(); // Remove filled bid order from queue 
-
-      }
-    if (ask.IsFilled())
-     {
-      asks.pop_front(); // Remove filled ask order from queue 
-     }
-
-    if (bids_.empty())
-     {
-      bids_.erase(bid_price);
-     }
-    if (asks_.empty())
-     {
-      asks_.erase(ask_price);
-     
-     }
-     trades.push_back(Trade(
-      TradeInfo{bid->GetOrderId(), ask->GetOrderId(), ask_price, quantity}));
-      TradeInfo{ask->GetOrderId(), bid->GetOrderId(), bid_price, quantity})); 
+ // Match method to match incoming orders against existing orders
+ 
+ Trades MatchOrders()
+ {
+  Trades trades;
+  trades.reserve(order_map_.size()); // Pre-allocate space for trades to minimize reallocations with empty vector 
+  
+  while(true){
+   if (bids_.empty() || asks_.empty()){
+    break; // No more possible matches
    }
-  }
+
+   // Get best prices
+   auto& [bid_price, bid_orders] = *bids_.begin(); 
+   auto& [ask_price, ask_orders] = *asks_.begin(); 
+
+   
+   while (!bid_orders.empty() && !ask_orders.empty()){
+    auto& bid = bid_orders.front(); // get the first order at the best bid price
+    auto& ask = ask_orders.front(); // get the first order at the best ask price
+    
+    Quantity quantity = std::min(bid->GetRemainingQuantity(), ask->GetRemainingQuantity()); // eg; Bid wants 100, Ask wants 70 → trade 70
+    
+    // Fill both orders
+    bid->Fill(quantity);  
+    ask->Fill(quantity);  
+    
+    // remove filled orders from order book
+    if (bid->IsFilled())
+    {
+        bid_orders.pop_front();
+    }
+    if (ask->IsFilled())
+    {
+        ask_orders.pop_front();
+    }
+    
+    // Remove price levels if no orders remain
+    if (bid_orders.empty())
+    {
+        bids_.erase(bid_price);
+    }
+    if (ask_orders.empty())
+    {
+        asks_.erase(ask_price);
+    }
+
+    // Create a trade object and add to trades vector
+    trades.push_back(Trade(
+     TradeInfo{bid->GetOrderId(), ask->GetOrderId(), ask_price, quantity },
+     TradeInfo{ask->GetOrderId(), bid->GetOrderId(), bid_price, quantity }
+    ));
+ }  
+
+ if (!bids_.empty()){
+    auto& [bids_] = *bids_.begin();
+    auto& Order = bids_.front();
+    if (Order.type() == OrderType::Fillandkill){
+        CancelOrder(Order.GetOrderId()); // Implement CancelOrder method to remove order from order book
+    }
  }
-}  
+ if (!asks_.empty()){
+    auto& [asks_] = *asks_.begin();
+    auto& Order = asks_.front();
+    if (Order.type() == OrderType::Fillandkill){
+        CancelOrder(Order.GetOrderId()); // Implement CancelOrder method to remove order from order book
+    } 
+ } 
+ }
+
+  return trades;
+} // End MatchOrders method
 
 
-int main(){
+public:
+
+ Trades ProcessNewOrder(OrderPointer order){
+  if (order_map_.contains(order->GetOrderId())){
+   return {}; // Break if duplicate order id's
+  }
+
+  if (order->GetOrderType() == OrderType::Fillandkill && !CanMatch(order->GetOrderSide(), order->GetPrice())){
+   return {}; // FOK order cannot be matched, so ignore it
+  }
+
+  OrderPointers::iterator iterator;
+
+  if (order->GetOrderSide() == OrderSide::Buy){
+   auto& orders = bids_[order->GetPrice()]; // Access or create list of orders at this price level
+   orders.push_back(order); // Add order to the list
+   iterator = std::prev(orders.end()); // Get iterator to the newly added order
+  }
+  else {
+   auto& orders = asks_[order->GetPrice()]; // Access or create list of orders at this price level
+   orders.push_back(order); // Add order to the list
+   iterator = std::prev(orders .end()); // Get iterator to the newly added order
+  }
+  order_map_.insert({order->GetOrderId(), OrderEntry{order, iterator}}); // Insert into order map for quick access
+  return MatchOrders(); // Attempt to match orders after adding the new order
+ }
 
 
-    return 0;
+
+void CancelOrder(OrderId order_id){
+ if (!orders_map_.contains(order_id)){
+   throw std::logic_error("CancelOrder: Order ID " + std::to_string(order_id) + " does not exist");
+ }
+ const auto& [order, orderiterator] = order_map_.at(order_id);
+ order_map_.erase(order_id);
+
+ if (order->GetOrderSide() == OrderSide::Buy){
+   auto& orders = bids_[order->GetPrice()]; // Access list of orders at this price level
+   orders.erase(orderiterator); // Remove order from the list at its price level
+   if (orders.empty()){
+       bids_.erase(order->GetPrice()); // Remove price level if no orders remain
+   }
+ }
+ else {
+   auto& orders = asks_[order->GetPrice()]; // Access list of orders at this price level
+   orders.erase(orderiterator); // Remove order from the list at its price level
+   if (orders.empty()){
+       asks_.erase(order->GetPrice()); // Remove price level if no orders remain
+   }
+ }
+ 
+  // Remove order from the list at its price level
+
+
 }
+
+
+
+
+
+}; // Closing brace for OrderBook class
+
+
+ int main(){
+  
+  
+  return 0;
+ }
+
+
