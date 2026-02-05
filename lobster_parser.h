@@ -18,7 +18,7 @@ enum class LobsterEventType {
 };
 
 
-struct lobster_order
+struct lobster_orderhttps://github.com/archie-brown3/order-book-cpp.git
 {
 
     double timestamp;
